@@ -36,6 +36,14 @@ jobs:
           git --version
           dvc --version || true
 
+      - name: Check required secrets
+        run: |
+          set -euo pipefail
+          if [[ -z "$MINIO_ACCESS_KEY" || -z "$MINIO_SECRET_KEY" ]]; then
+            echo "MINIO_ACCESS_KEY and MINIO_SECRET_KEY must be configured as GitHub Actions secrets"
+            exit 1
+          fi
+
       - name: Setup Python environment
         run: |
           set -euo pipefail
