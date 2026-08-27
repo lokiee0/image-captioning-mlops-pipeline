@@ -40,7 +40,19 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf venv
-          python3 -m venv venv
+          if python3 -m venv venv; then
+            echo "Created environment with python3 -m venv"
+          else
+            rm -rf venv
+            echo "ensurepip is unavailable; trying virtualenv fallback"
+            python3 -m pip install --user --upgrade virtualenv
+            if ! python3 -m virtualenv venv; then
+              echo "Unable to create a Python environment."
+              echo "Install the matching Debian package on the runner:"
+              echo "sudo apt-get update && sudo apt-get install -y python3.12-venv"
+              exit 1
+            fi
+          fi
           source venv/bin/activate
           python -m pip install --upgrade pip
           if [[ -f requirements.txt ]]; then
