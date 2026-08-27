@@ -39,26 +39,44 @@ jobs:
       - name: Setup Python environment
         run: |
           set -euo pipefail
+          rm -rf venv
           python3 -m venv venv
           source venv/bin/activate
           python -m pip install --upgrade pip
           if [[ -f requirements.txt ]]; then
             python -m pip install -r requirements.txt
-              fi
+          else
+            echo "requirements.txt not found"
+            exit 1
+          fi
+
+      - name: Check MinIO
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            http://127.0.0.1:9000/minio/health/live
 
       - name: Start pipeline services
         run: |
           set -euo pipefail
-          docker compose up -d minio postgres mlflow minio-init
+          docker compose up -d postgres mlflow
           for attempt in {1..30}; do
-            if curl --fail --silent http://127.0.0.1:5000/health >/dev/null; then
-              exit 0
+            if docker compose exec -T postgres pg_isready -U mlops -d mlops >/dev/null 2>&1; then
+              break
             fi
             sleep 2
           done
-          echo "MLflow did not become ready"
-          docker compose logs mlflow postgres minio
-          exit 1
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:5000/health >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          if ! curl --fail --silent http://127.0.0.1:5000/health >/dev/null; then
+            echo "MLflow did not become ready"
+            docker compose logs postgres mlflow
+            exit 1
+          fi
 
       - name: Configure DVC
         run: |
@@ -74,6 +92,29 @@ jobs:
           set -euo pipefail
           source venv/bin/activate
           dvc pull --remote minio
+
+      - name: Verify dataset metadata
+        run: |
+          set -euo pipefail
+          source venv/bin/activate
+          python - <<'PY'
+          import os
+          import psycopg2
+
+          with psycopg2.connect(os.environ["POSTGRES_DSN"]) as connection:
+              with connection.cursor() as cursor:
+                  cursor.execute(
+                      "SELECT COUNT(*) FROM dataset_metadata WHERE dataset_name = %s",
+                      (os.environ["MLOPS_DATASET"],),
+                  )
+                  count = cursor.fetchone()[0]
+
+          if count == 0:
+              raise SystemExit(
+                  f"No dataset_metadata rows found for {os.environ['MLOPS_DATASET']}"
+              )
+          print(f"Found {count} metadata rows")
+          PY
 
       - name: Train model
         run: |

@@ -29,28 +29,18 @@ services:
     command: >
       mlflow server
       --backend-store-uri postgresql://mlops:mlops@postgres:5432/mlops
-      --default-artifact-root s3://mlops-datasets/mlflow-artifacts
+      --default-artifact-root s3://image-captioning/mlflow-artifacts
       --host 0.0.0.0 --port 5000
     ports:
       - "5000:5000"
     environment:
-      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      MLFLOW_S3_ENDPOINT_URL: http://host.docker.internal:9000
       AWS_ACCESS_KEY_ID: minioadmin
       AWS_SECRET_ACCESS_KEY: minioadminpassword
     depends_on:
       - postgres
-      - minio
-
-  minio-init:
-    image: minio/mc:latest
-    depends_on:
-      - minio
-    entrypoint: /bin/sh
-    command: >-
-      -c 'until mc alias set local http://minio:9000 minioadmin minioadminpassword; do
-      sleep 2; done;
-      mc mb --ignore-existing local/image-captioning;
-      mc mb --ignore-existing local/mlops-datasets'
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   serving-api:
     build:
