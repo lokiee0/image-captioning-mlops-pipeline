@@ -1,5 +1,6 @@
-torch>=2.2
-torchvision>=0.17
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.2.2+cpu
+torchvision==0.17.2+cpu
 datasets>=2.19
 Pillow
 minio
@@ -15,5 +16,4 @@ uvicorn[standard]
 prometheus-client
 python-multipart
 requests
-apache-airflow>=2.8
-dvc[s3]
+dvc[s3]==3.67.1
