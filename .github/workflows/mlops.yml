@@ -1,0 +1,108 @@
+name: Image Captioning MLOps
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  MLOPS_DATASET: flickr8k
+  MINIO_ENDPOINT: 127.0.0.1:9000
+  MINIO_ACCESS_KEY: ${{ secrets.MINIO_ACCESS_KEY }}
+  MINIO_SECRET_KEY: ${{ secrets.MINIO_SECRET_KEY }}
+  MINIO_SECURE: "false"
+  MLFLOW_TRACKING_URI: http://127.0.0.1:5000
+  POSTGRES_DSN: postgresql://mlops:mlops@127.0.0.1:5432/mlops
+
+jobs:
+  mlops-pipeline:
+    name: Run MLOps Pipeline
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check runner
+        run: |
+          set -euo pipefail
+          echo "Runner: $(hostname)"
+          echo "User: $(whoami)"
+          echo "Working directory: $(pwd)"
+          python3 --version
+          git --version
+          dvc --version || true
+
+      - name: Setup Python environment
+        run: |
+          set -euo pipefail
+          python3 -m venv venv
+          source venv/bin/activate
+          python -m pip install --upgrade pip
+          if [[ -f requirements.txt ]]; then
+            python -m pip install -r requirements.txt
+              fi
+
+      - name: Start pipeline services
+        run: |
+          set -euo pipefail
+          docker compose up -d minio postgres mlflow minio-init
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:5000/health >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "MLflow did not become ready"
+          docker compose logs mlflow postgres minio
+          exit 1
+
+      - name: Configure DVC
+        run: |
+          set -euo pipefail
+          source venv/bin/activate
+          dvc remote add -f minio s3://image-captioning/dvc-store
+          dvc remote modify --local minio endpointurl http://127.0.0.1:9000
+          dvc remote modify --local minio access_key_id "$MINIO_ACCESS_KEY"
+          dvc remote modify --local minio secret_access_key "$MINIO_SECRET_KEY"
+
+      - name: DVC pull
+        run: |
+          set -euo pipefail
+          source venv/bin/activate
+          dvc pull --remote minio
+
+      - name: Train model
+        run: |
+          set -euo pipefail
+          source venv/bin/activate
+          python src/train.py --dataset "$MLOPS_DATASET" 2>&1 | tee train.log
+          run_id=$(sed -n 's/.*run_id=\([^ ]*\).*/\1/p' train.log | tail -n 1)
+          if [[ -z "$run_id" ]]; then
+            echo "Training completed without emitting an MLflow run ID"
+            exit 1
+          fi
+          echo "MLFLOW_RUN_ID=$run_id" >> "$GITHUB_ENV"
+
+      - name: Evaluate model
+        run: |
+          set -euo pipefail
+          source venv/bin/activate
+          python src/evaluate.py --run-id "$MLFLOW_RUN_ID" --dataset "$MLOPS_DATASET"
+
+      - name: Show artifacts
+        run: |
+          set -euo pipefail
+          find . \
+            -path './.git' -prune -o \
+            -path './venv' -prune -o \
+            -type f \
+            \( -name '*.pt' -o -name '*.pth' -o -name '*.pkl' -o -name '*.json' \) \
+            -print
+
+      - name: Pipeline completed
+        run: |
+          echo "MLOps pipeline completed successfully on $(hostname)"
