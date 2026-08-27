@@ -9,6 +9,7 @@ psycopg2-binary
 mlflow>=2.12
 nltk
 evidently>=0.4
+statsmodels==0.14.6
 fastapi
 uvicorn[standard]
 prometheus-client
